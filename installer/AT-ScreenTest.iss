@@ -3,7 +3,7 @@
 ; Requires the app to already be published to ..\publish (see README.md)
 
 #define MyAppName "AT ScreenTest"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "Adam Tomlinson"
 #define MyAppExeName "ScreenTest.exe"
 

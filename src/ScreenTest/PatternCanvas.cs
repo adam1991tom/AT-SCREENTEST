@@ -5,6 +5,7 @@ using Point = System.Windows.Point;
 using Pen = System.Windows.Media.Pen;
 using Color = System.Windows.Media.Color;
 using Brushes = System.Windows.Media.Brushes;
+using Brush = System.Windows.Media.Brush;
 using FontFamily = System.Windows.Media.FontFamily;
 
 namespace ScreenTest;
@@ -21,7 +22,10 @@ public class PatternCanvas : FrameworkElement
     private static readonly int[] CheckerSizes = { 1, 2, 4, 8, 16, 32, 64 };
     private static readonly double[] MotionSpeeds = { 120, 240, 480, 960, 1920 }; // DIPs/sec
 
+    private const double TargetFrameSeconds = 1.0 / 30.0; // cap animation redraws so no pattern can flood the UI thread
+
     private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private double _lastInvalidateSeconds = -1;
     private int _checkerSizeIndex = 1;
     private int _motionSpeedIndex = 2;
     private int _tileCols = 8;
@@ -33,7 +37,13 @@ public class PatternCanvas : FrameworkElement
 
     public PatternCanvas()
     {
-        CompositionTarget.Rendering += (_, _) => InvalidateVisual();
+        CompositionTarget.Rendering += (_, _) =>
+        {
+            var now = Elapsed;
+            if (now - _lastInvalidateSeconds < TargetFrameSeconds) return;
+            _lastInvalidateSeconds = now;
+            InvalidateVisual();
+        };
     }
 
     public void SetPattern(TestPattern pattern)
@@ -54,12 +64,12 @@ public class PatternCanvas : FrameworkElement
 
     public void AdjustTileColumns(int direction)
     {
-        _tileCols = Math.Clamp(_tileCols + direction, 1, 64);
+        _tileCols = Math.Clamp(_tileCols + direction, 1, 32);
     }
 
     public void AdjustTileRows(int direction)
     {
-        _tileRows = Math.Clamp(_tileRows + direction, 1, 64);
+        _tileRows = Math.Clamp(_tileRows + direction, 1, 32);
     }
 
     public string AdjustmentSummary() => Pattern switch
@@ -181,35 +191,33 @@ public class PatternCanvas : FrameworkElement
 
     private void DrawCheckerboard(DrawingContext dc, Rect rect)
     {
+        // Rendered as a single GPU-tiled 2x2 brush rather than one shape per cell: at a 1px
+        // cell size on a 4K screen that's millions of cells, and this pattern now redraws
+        // every frame for the auto-invert animation, so a per-cell geometry would have to
+        // rebuild millions of shapes 30 times a second and lock up the UI thread.
         var cellPixels = CheckerSizes[_checkerSizeIndex];
         var cellSize = cellPixels * DevicePixel;
         var invert = (long)(Elapsed / 1.0) % 2 == 1; // auto-inverts every second: classic pixel-refresh/burn-in pattern
 
-        dc.DrawRectangle(Brushes.Black, null, rect);
-
-        var cols = (int)Math.Ceiling(rect.Width / cellSize);
-        var rows = (int)Math.Ceiling(rect.Height / cellSize);
-
-        var whiteGeometry = new StreamGeometry();
-        using (var ctx = whiteGeometry.Open())
+        var tile = new DrawingGroup();
+        using (var ctx = tile.Open())
         {
-            for (var row = 0; row < rows; row++)
-            {
-                for (var col = 0; col < cols; col++)
-                {
-                    var isWhite = ((row + col) % 2 == 0) != invert;
-                    if (!isWhite) continue;
-                    var x = col * cellSize;
-                    var y = row * cellSize;
-                    ctx.BeginFigure(new Point(x, y), true, true);
-                    ctx.LineTo(new Point(x + cellSize, y), false, false);
-                    ctx.LineTo(new Point(x + cellSize, y + cellSize), false, false);
-                    ctx.LineTo(new Point(x, y + cellSize), false, false);
-                }
-            }
+            var (bg, fg) = invert ? (Brushes.White, Brushes.Black) : ((Brush)Brushes.Black, (Brush)Brushes.White);
+            ctx.DrawRectangle(bg, null, new Rect(0, 0, 2, 2));
+            ctx.DrawRectangle(fg, null, new Rect(1, 0, 1, 1));
+            ctx.DrawRectangle(fg, null, new Rect(0, 1, 1, 1));
         }
-        whiteGeometry.Freeze();
-        dc.DrawGeometry(Brushes.White, null, whiteGeometry);
+        tile.Freeze();
+
+        var brush = new DrawingBrush(tile)
+        {
+            TileMode = TileMode.Tile,
+            Viewport = new Rect(0, 0, cellSize * 2, cellSize * 2),
+            ViewportUnits = BrushMappingMode.Absolute,
+        };
+        brush.Freeze();
+
+        dc.DrawRectangle(brush, null, rect);
     }
 
     private void DrawCrosshatch(DrawingContext dc, Rect rect)
