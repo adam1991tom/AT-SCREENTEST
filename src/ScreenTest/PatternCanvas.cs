@@ -1,0 +1,429 @@
+using System.Windows;
+using System.Windows.Media;
+
+namespace ScreenTest;
+
+/// <summary>
+/// Renders the currently selected test pattern directly via DrawingContext for full
+/// control over pixel-level accuracy (important for dead-pixel / checkerboard / geometry
+/// patterns on high-DPI 4K displays).
+/// </summary>
+public class PatternCanvas : FrameworkElement
+{
+    private static readonly int[] CheckerSizes = { 1, 2, 4, 8, 16, 32, 64 };
+    private static readonly double[] MotionSpeeds = { 120, 240, 480, 960, 1920 }; // DIPs/sec
+
+    private int _checkerSizeIndex = 1;
+    private int _motionSpeedIndex = 2;
+    private double _motionLineX;
+    private DateTime _lastFrameTime;
+    private bool _animating;
+    private int _tileCols = 8;
+    private int _tileRows = 4;
+
+    public TestPattern Pattern { get; private set; } = TestPattern.SolidBlack;
+    public bool ShowOverlay { get; set; } = true;
+    public string OverlayText { get; set; } = string.Empty;
+
+    public void SetPattern(TestPattern pattern)
+    {
+        Pattern = pattern;
+        _motionLineX = 0;
+        UpdateAnimationState();
+        InvalidateVisual();
+    }
+
+    public void AdjustCheckerSize(int direction)
+    {
+        _checkerSizeIndex = Math.Clamp(_checkerSizeIndex + direction, 0, CheckerSizes.Length - 1);
+        InvalidateVisual();
+    }
+
+    public void AdjustMotionSpeed(int direction)
+    {
+        _motionSpeedIndex = Math.Clamp(_motionSpeedIndex + direction, 0, MotionSpeeds.Length - 1);
+    }
+
+    public void AdjustTileColumns(int direction)
+    {
+        _tileCols = Math.Clamp(_tileCols + direction, 1, 64);
+        InvalidateVisual();
+    }
+
+    public void AdjustTileRows(int direction)
+    {
+        _tileRows = Math.Clamp(_tileRows + direction, 1, 64);
+        InvalidateVisual();
+    }
+
+    public string AdjustmentSummary() => Pattern switch
+    {
+        TestPattern.Checkerboard => $"Cell size: {CheckerSizes[_checkerSizeIndex]}px  (+/- to change)",
+        TestPattern.MotionLine => $"Speed: {MotionSpeeds[_motionSpeedIndex]:0} px/s  (+/- to change)",
+        TestPattern.LedTileMap => $"Grid: {_tileCols} x {_tileRows} tiles  (+/- columns, [ / ] rows)",
+        _ => string.Empty,
+    };
+
+    private void UpdateAnimationState()
+    {
+        var shouldAnimate = Pattern == TestPattern.MotionLine;
+        if (shouldAnimate == _animating) return;
+
+        _animating = shouldAnimate;
+        if (_animating)
+        {
+            _lastFrameTime = DateTime.UtcNow;
+            CompositionTarget.Rendering += OnRendering;
+        }
+        else
+        {
+            CompositionTarget.Rendering -= OnRendering;
+        }
+    }
+
+    private void OnRendering(object? sender, EventArgs e)
+    {
+        var now = DateTime.UtcNow;
+        var dt = (now - _lastFrameTime).TotalSeconds;
+        _lastFrameTime = now;
+
+        var width = ActualWidth > 0 ? ActualWidth : 1920;
+        _motionLineX += MotionSpeeds[_motionSpeedIndex] * dt;
+        if (_motionLineX > width) _motionLineX = 0;
+
+        InvalidateVisual();
+    }
+
+    private double DpiScale
+    {
+        get
+        {
+            var source = PresentationSource.FromVisual(this);
+            return source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+        }
+    }
+
+    /// <summary>Size, in DIPs, of one physical device pixel.</summary>
+    private double DevicePixel => 1.0 / DpiScale;
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        var w = ActualWidth;
+        var h = ActualHeight;
+        if (w <= 0 || h <= 0) return;
+
+        var rect = new Rect(0, 0, w, h);
+
+        switch (Pattern)
+        {
+            case TestPattern.SolidBlack: dc.DrawRectangle(Brushes.Black, null, rect); break;
+            case TestPattern.SolidWhite: dc.DrawRectangle(Brushes.White, null, rect); break;
+            case TestPattern.SolidRed: dc.DrawRectangle(Brushes.Red, null, rect); break;
+            case TestPattern.SolidGreen: dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0, 255, 0)), null, rect); break;
+            case TestPattern.SolidBlue: dc.DrawRectangle(Brushes.Blue, null, rect); break;
+            case TestPattern.Gray50: dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(128, 128, 128)), null, rect); break;
+            case TestPattern.ColorBars: DrawColorBars(dc, rect); break;
+            case TestPattern.GrayscaleGradient: DrawGrayscaleGradient(dc, rect); break;
+            case TestPattern.RgbGradient: DrawRgbGradient(dc, rect); break;
+            case TestPattern.Checkerboard: DrawCheckerboard(dc, rect); break;
+            case TestPattern.CrosshatchGeometry: DrawCrosshatch(dc, rect); break;
+            case TestPattern.SharpnessText: DrawSharpnessText(dc, rect); break;
+            case TestPattern.MotionLine: DrawMotionLine(dc, rect); break;
+            case TestPattern.OverscanBorder: DrawOverscanBorder(dc, rect); break;
+            case TestPattern.LedTileMap: DrawLedTileMap(dc, rect); break;
+        }
+
+        if (ShowOverlay && !string.IsNullOrEmpty(OverlayText))
+        {
+            DrawOverlay(dc, rect);
+        }
+    }
+
+    private static void DrawColorBars(DrawingContext dc, Rect rect)
+    {
+        Color[] colors =
+        {
+            Colors.White,
+            Color.FromRgb(255, 255, 0),   // Yellow
+            Color.FromRgb(0, 255, 255),   // Cyan
+            Color.FromRgb(0, 255, 0),     // Green
+            Color.FromRgb(255, 0, 255),   // Magenta
+            Color.FromRgb(255, 0, 0),     // Red
+            Color.FromRgb(0, 0, 255),     // Blue
+            Colors.Black,
+        };
+
+        dc.DrawRectangle(Brushes.Black, null, rect);
+        var barWidth = rect.Width / colors.Length;
+        for (var i = 0; i < colors.Length; i++)
+        {
+            var barRect = new Rect(rect.X + i * barWidth, rect.Y, barWidth + 1, rect.Height);
+            dc.DrawRectangle(new SolidColorBrush(colors[i]), null, barRect);
+        }
+    }
+
+    private static void DrawGrayscaleGradient(DrawingContext dc, Rect rect)
+    {
+        var brush = new LinearGradientBrush(Colors.Black, Colors.White, new Point(0, 0), new Point(1, 0));
+        dc.DrawRectangle(brush, null, rect);
+    }
+
+    private static void DrawRgbGradient(DrawingContext dc, Rect rect)
+    {
+        var third = rect.Height / 3.0;
+        var redRect = new Rect(rect.X, rect.Y, rect.Width, third);
+        var greenRect = new Rect(rect.X, rect.Y + third, rect.Width, third);
+        var blueRect = new Rect(rect.X, rect.Y + 2 * third, rect.Width, rect.Height - 2 * third);
+
+        dc.DrawRectangle(new LinearGradientBrush(Colors.Black, Colors.Red, new Point(0, 0), new Point(1, 0)), null, redRect);
+        dc.DrawRectangle(new LinearGradientBrush(Colors.Black, Colors.Lime, new Point(0, 0), new Point(1, 0)), null, greenRect);
+        dc.DrawRectangle(new LinearGradientBrush(Colors.Black, Colors.Blue, new Point(0, 0), new Point(1, 0)), null, blueRect);
+    }
+
+    private void DrawCheckerboard(DrawingContext dc, Rect rect)
+    {
+        var cellPixels = CheckerSizes[_checkerSizeIndex];
+        var cellSize = cellPixels * DevicePixel;
+
+        dc.DrawRectangle(Brushes.Black, null, rect);
+
+        var cols = (int)Math.Ceiling(rect.Width / cellSize);
+        var rows = (int)Math.Ceiling(rect.Height / cellSize);
+
+        var whiteGeometry = new StreamGeometry();
+        using (var ctx = whiteGeometry.Open())
+        {
+            for (var row = 0; row < rows; row++)
+            {
+                for (var col = 0; col < cols; col++)
+                {
+                    if ((row + col) % 2 != 0) continue;
+                    var x = col * cellSize;
+                    var y = row * cellSize;
+                    ctx.BeginFigure(new Point(x, y), true, true);
+                    ctx.LineTo(new Point(x + cellSize, y), false, false);
+                    ctx.LineTo(new Point(x + cellSize, y + cellSize), false, false);
+                    ctx.LineTo(new Point(x, y + cellSize), false, false);
+                }
+            }
+        }
+        whiteGeometry.Freeze();
+        dc.DrawGeometry(Brushes.White, null, whiteGeometry);
+    }
+
+    private void DrawCrosshatch(DrawingContext dc, Rect rect)
+    {
+        dc.DrawRectangle(Brushes.Black, null, rect);
+
+        var pen = new Pen(Brushes.White, DevicePixel);
+        pen.Freeze();
+        var thickPen = new Pen(Brushes.Lime, DevicePixel * 2);
+        thickPen.Freeze();
+
+        const int divisions = 12;
+        var stepX = rect.Width / divisions;
+        var stepY = rect.Height / divisions;
+
+        for (var i = 1; i < divisions; i++)
+        {
+            dc.DrawLine(pen, new Point(i * stepX, 0), new Point(i * stepX, rect.Height));
+            dc.DrawLine(pen, new Point(0, i * stepY), new Point(rect.Width, i * stepY));
+        }
+
+        // Border frame
+        dc.DrawRectangle(null, thickPen, new Rect(1, 1, rect.Width - 2, rect.Height - 2));
+
+        // Center crosshair
+        var cx = rect.Width / 2;
+        var cy = rect.Height / 2;
+        dc.DrawLine(thickPen, new Point(cx, 0), new Point(cx, rect.Height));
+        dc.DrawLine(thickPen, new Point(0, cy), new Point(rect.Width, cy));
+
+        // Inscribed circle for geometry/aspect-ratio distortion check
+        var radius = Math.Min(rect.Width, rect.Height) / 2 - 4;
+        dc.DrawEllipse(null, thickPen, new Point(cx, cy), radius, radius);
+
+        // Corner markers
+        var markerLen = Math.Min(rect.Width, rect.Height) * 0.04;
+        DrawCornerMarker(dc, thickPen, new Point(0, 0), markerLen, 1, 1);
+        DrawCornerMarker(dc, thickPen, new Point(rect.Width, 0), markerLen, -1, 1);
+        DrawCornerMarker(dc, thickPen, new Point(0, rect.Height), markerLen, 1, -1);
+        DrawCornerMarker(dc, thickPen, new Point(rect.Width, rect.Height), markerLen, -1, -1);
+    }
+
+    private static void DrawCornerMarker(DrawingContext dc, Pen pen, Point corner, double len, int dx, int dy)
+    {
+        dc.DrawLine(pen, corner, new Point(corner.X + len * dx, corner.Y));
+        dc.DrawLine(pen, corner, new Point(corner.X, corner.Y + len * dy));
+    }
+
+    private void DrawSharpnessText(DrawingContext dc, Rect rect)
+    {
+        dc.DrawRectangle(Brushes.Black, null, rect);
+
+        var typeface = new Typeface(new FontFamily("Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        double[] sizes = { 48, 32, 24, 18, 14, 11, 9, 7 };
+        var y = rect.Height * 0.06;
+
+        foreach (var size in sizes)
+        {
+            var text = new FormattedText(
+                $"{size:0}pt  AT ScreenTest — Sharpness Check 0123456789",
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                typeface,
+                size,
+                Brushes.White,
+                DpiScale);
+            dc.DrawText(text, new Point(rect.Width * 0.04, y));
+            y += size * 1.6;
+        }
+
+        // Fine hairline grid + diagonal lines in a corner box to reveal moire/scaling artifacts
+        var boxSize = Math.Min(rect.Width, rect.Height) * 0.32;
+        var box = new Rect(rect.Width - boxSize - 24, rect.Height - boxSize - 24, boxSize, boxSize);
+        var pen = new Pen(Brushes.White, DevicePixel);
+        pen.Freeze();
+        dc.DrawRectangle(Brushes.Black, pen, box);
+
+        var lineSpacing = DevicePixel * 2;
+        for (var x = box.X; x < box.X + box.Width; x += lineSpacing)
+        {
+            dc.DrawLine(pen, new Point(x, box.Y), new Point(x, box.Y + box.Height));
+        }
+        dc.DrawLine(pen, box.TopLeft, box.BottomRight);
+        dc.DrawLine(pen, box.TopRight, box.BottomLeft);
+    }
+
+    private void DrawMotionLine(DrawingContext dc, Rect rect)
+    {
+        dc.DrawRectangle(Brushes.Black, null, rect);
+        var lineWidth = Math.Max(DevicePixel * 6, 4);
+        var pen = new Pen(Brushes.White, lineWidth);
+        dc.DrawLine(pen, new Point(_motionLineX, 0), new Point(_motionLineX, rect.Height));
+    }
+
+    private void DrawOverscanBorder(DrawingContext dc, Rect rect)
+    {
+        dc.DrawRectangle(Brushes.Black, null, rect);
+
+        var edgePen = new Pen(Brushes.Red, DevicePixel);
+        edgePen.Freeze();
+        dc.DrawRectangle(null, edgePen, new Rect(0.5, 0.5, rect.Width - 1, rect.Height - 1));
+
+        // 5% inset "safe area" commonly used to check for TV overscan
+        var insetPen = new Pen(Brushes.Lime, DevicePixel);
+        insetPen.Freeze();
+        var insetX = rect.Width * 0.05;
+        var insetY = rect.Height * 0.05;
+        dc.DrawRectangle(null, insetPen,
+            new Rect(insetX, insetY, rect.Width - 2 * insetX, rect.Height - 2 * insetY));
+
+        var typeface = new Typeface("Consolas");
+        var label = new FormattedText(
+            "RED = physical screen edge   GREEN = 5% overscan safe area",
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            16,
+            Brushes.White,
+            DpiScale);
+        dc.DrawText(label, new Point(insetX + 12, insetY + 12));
+    }
+
+    private void DrawLedTileMap(DrawingContext dc, Rect rect)
+    {
+        dc.DrawRectangle(Brushes.Black, null, rect);
+
+        var cellWidth = rect.Width / _tileCols;
+        var cellHeight = rect.Height / _tileRows;
+        var pixelCellWidth = (int)Math.Round(cellWidth * DpiScale);
+        var pixelCellHeight = (int)Math.Round(cellHeight * DpiScale);
+
+        var gridPen = new Pen(Brushes.Black, DevicePixel * 2);
+        gridPen.Freeze();
+
+        var fontSize = Math.Clamp(Math.Min(cellWidth, cellHeight) * 0.16, 7, 22);
+        var typeface = new Typeface(new FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+        var markerSize = Math.Min(cellWidth, cellHeight) * 0.18;
+
+        for (var row = 0; row < _tileRows; row++)
+        {
+            for (var col = 0; col < _tileCols; col++)
+            {
+                var cellRect = new Rect(col * cellWidth, row * cellHeight, cellWidth, cellHeight);
+                var fill = new SolidColorBrush(TileColor(row, col));
+                dc.DrawRectangle(fill, gridPen, cellRect);
+
+                // Orientation marker: filled triangle in the top-left corner of every tile.
+                // If a panel is physically rotated/flipped, its marker will no longer sit
+                // top-left relative to its neighbors, making the fault obvious at a glance.
+                var triangle = new StreamGeometry();
+                using (var ctx = triangle.Open())
+                {
+                    ctx.BeginFigure(cellRect.TopLeft, true, true);
+                    ctx.LineTo(new Point(cellRect.X + markerSize, cellRect.Y), false, false);
+                    ctx.LineTo(new Point(cellRect.X, cellRect.Y + markerSize), false, false);
+                }
+                triangle.Freeze();
+                dc.DrawGeometry(Brushes.White, null, triangle);
+
+                var label = new FormattedText(
+                    $"R{row} C{col}\n{pixelCellWidth}x{pixelCellHeight}\n@{(int)Math.Round(col * cellWidth * DpiScale)},{(int)Math.Round(row * cellHeight * DpiScale)}",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight,
+                    typeface,
+                    fontSize,
+                    Brushes.White,
+                    DpiScale);
+
+                var textOrigin = new Point(
+                    cellRect.X + (cellRect.Width - label.Width) / 2,
+                    cellRect.Y + (cellRect.Height - label.Height) / 2);
+                dc.DrawText(label, textOrigin);
+            }
+        }
+    }
+
+    private static Color TileColor(int row, int col)
+    {
+        var hue = (col / 1.0 % 8) * 45.0;
+        var lightness = (row % 2 == 0) ? 0.42 : 0.30;
+        return HsvToColor(hue, 0.65, lightness);
+    }
+
+    private static Color HsvToColor(double hue, double saturation, double value)
+    {
+        var c = value * saturation;
+        var x = c * (1 - Math.Abs((hue / 60.0) % 2 - 1));
+        var m = value - c;
+        var (r, g, b) = hue switch
+        {
+            < 60 => (c, x, 0.0),
+            < 120 => (x, c, 0.0),
+            < 180 => (0.0, c, x),
+            < 240 => (0.0, x, c),
+            < 300 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255));
+    }
+
+    private void DrawOverlay(DrawingContext dc, Rect rect)
+    {
+        var typeface = new Typeface("Consolas");
+        var text = new FormattedText(
+            OverlayText,
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            16,
+            Brushes.Lime,
+            DpiScale);
+
+        var padding = 10;
+        var bgRect = new Rect(10, 10, text.Width + padding * 2, text.Height + padding * 2);
+        dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(180, 0, 0, 0)), null, bgRect);
+        dc.DrawText(text, new Point(10 + padding, 10 + padding));
+    }
+}
