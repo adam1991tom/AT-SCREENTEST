@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using WinFormsScreen = System.Windows.Forms.Screen;
 
 namespace ScreenTest;

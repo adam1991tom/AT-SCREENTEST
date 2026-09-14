@@ -6,6 +6,7 @@ obj/
 
 ## Build output
 publish/
+dist/
 *.pdb
 
 ## OS

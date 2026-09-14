@@ -1,5 +1,10 @@
 using System.Windows;
 using System.Windows.Media;
+using Point = System.Windows.Point;
+using Pen = System.Windows.Media.Pen;
+using Color = System.Windows.Media.Color;
+using Brushes = System.Windows.Media.Brushes;
+using FontFamily = System.Windows.Media.FontFamily;
 
 namespace ScreenTest;
 
@@ -270,7 +275,7 @@ public class PatternCanvas : FrameworkElement
             var text = new FormattedText(
                 $"{size:0}pt  AT ScreenTest — Sharpness Check 0123456789",
                 System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
+                System.Windows.FlowDirection.LeftToRight,
                 typeface,
                 size,
                 Brushes.White,
@@ -323,7 +328,7 @@ public class PatternCanvas : FrameworkElement
         var label = new FormattedText(
             "RED = physical screen edge   GREEN = 5% overscan safe area",
             System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
+            System.Windows.FlowDirection.LeftToRight,
             typeface,
             16,
             Brushes.White,
@@ -371,7 +376,7 @@ public class PatternCanvas : FrameworkElement
                 var label = new FormattedText(
                     $"R{row} C{col}\n{pixelCellWidth}x{pixelCellHeight}\n@{(int)Math.Round(col * cellWidth * DpiScale)},{(int)Math.Round(row * cellHeight * DpiScale)}",
                     System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight,
+                    System.Windows.FlowDirection.LeftToRight,
                     typeface,
                     fontSize,
                     Brushes.White,
@@ -415,7 +420,7 @@ public class PatternCanvas : FrameworkElement
         var text = new FormattedText(
             OverlayText,
             System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
+            System.Windows.FlowDirection.LeftToRight,
             typeface,
             16,
             Brushes.Lime,
