@@ -56,3 +56,16 @@ requiring .NET to be installed separately.
 
 Prebuilt artifacts are also produced automatically by the GitHub Actions workflow on
 every push — see the **Actions** tab.
+
+## Building an installer (setup.exe)
+
+Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php). After publishing (above):
+
+```powershell
+& "ISCC.exe" installer\AT-ScreenTest.iss
+```
+
+This produces `dist\AT-ScreenTest-Setup.exe` — a single installer that puts the app in
+Program Files, adds a Start Menu entry and optional desktop shortcut, and registers an
+uninstaller. Copy that one file to another Windows machine to install AT ScreenTest
+there (no .NET install required — it's fully self-contained).
