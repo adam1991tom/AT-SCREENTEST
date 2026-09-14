@@ -22,7 +22,7 @@ public partial class App : Application
                 MessageBoxButton.OK, MessageBoxImage.Error);
         };
 
-        var window = new MainWindow();
+        var window = new ControlWindow();
         MainWindow = window;
         window.Show();
     }

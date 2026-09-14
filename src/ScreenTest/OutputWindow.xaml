@@ -1,0 +1,15 @@
+<Window x:Class="ScreenTest.OutputWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ScreenTest"
+        Title="AT ScreenTest — Output"
+        Background="Black"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="Manual"
+        Topmost="True">
+    <Grid>
+        <local:PatternCanvas x:Name="PatternDisplay" />
+    </Grid>
+</Window>

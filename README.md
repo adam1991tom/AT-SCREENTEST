@@ -6,6 +6,19 @@ video-wall tile map for verifying panel numbering, coordinates and orientation.
 Built with WPF on .NET 8, per-monitor DPI aware for pixel-accurate patterns on scaled
 4K displays.
 
+## Two windows: Control + Output
+
+Launching the app opens two windows:
+
+- **Control** — a normal small window with a monitor picker, a clickable list of test
+  patterns, and adjustment buttons. Keep this on your own screen (e.g. your laptop).
+- **Output** — a borderless fullscreen window that shows the actual test pattern.
+  Point it at whichever monitor you're testing, using the "Output monitor" dropdown
+  in the Control window.
+
+This means you never need keyboard/mouse access to the screen under test — everything
+is driven from the Control window, which can sit on a completely different monitor.
+
 ## Test patterns
 
 Every pattern animates continuously except Crosshatch/Geometry and Sharpness/Text,
@@ -29,21 +42,16 @@ which hold still on purpose since they're meant to be measured against.
 
 ## Controls
 
-The app opens as a normal window — drag it onto whichever monitor you want to test
-(or move it with `M` / Win+Shift+Arrow), then press `F` to go fullscreen on that
-monitor.
+Everything is mouse-driven from the Control window:
 
-| Key | Action |
-|---|---|
-| `←` / `→` / `Space` | Previous / next pattern |
-| `1`–`9`, `0` | Jump directly to pattern 1–10 |
-| `I` | Toggle info overlay |
-| `M` | Move window to next monitor |
-| `F` / `F11` | Toggle fullscreen on current monitor |
-| `+` / `-` | Adjust current pattern (checker cell size, motion speed, tile columns) |
-| `[` / `]` | Adjust LED tile map rows |
-| `Esc` | Exit fullscreen (back to windowed) |
-| `Ctrl+Q` | Quit |
+- **Output monitor** dropdown — moves the Output window to cover that monitor
+- **Test pattern** list — click a pattern to show it on the Output window
+- **−** / **+** buttons — adjust the current pattern's setting (checker cell size,
+  motion speed, or LED tile map columns)
+- **Rows −** / **Rows +** — adjust LED tile map row count
+- **Show info overlay** checkbox — toggles the resolution/pattern info box on the
+  Output window
+- Closing the Control window also closes the Output window
 
 ## Building
 
