@@ -33,7 +33,11 @@ public partial class ControlWindow : Window
             MonitorCombo.SelectedItem = monitors.Count > 1 ? monitors[1] : monitors[0];
         };
 
-        Closing += (_, _) => _output.Close();
+        Closing += (_, _) =>
+        {
+            _output.AllowClose = true;
+            _output.Close();
+        };
     }
 
     private void RefreshMonitorList()

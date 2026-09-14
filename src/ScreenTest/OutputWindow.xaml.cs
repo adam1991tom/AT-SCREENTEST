@@ -10,11 +10,26 @@ namespace ScreenTest;
 /// </summary>
 public partial class OutputWindow : Window
 {
+    /// <summary>Set by ControlWindow right before it intentionally shuts this window down.</summary>
+    public bool AllowClose { get; set; }
+
     public PatternCanvas Canvas => PatternDisplay;
 
     public OutputWindow()
     {
         InitializeComponent();
+        Closing += OnClosingAttempt;
+    }
+
+    private void OnClosingAttempt(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // This window has no title bar, so there's no visible way to close it - but
+        // Alt+F4 still closes whatever window has focus regardless of its chrome. Once a
+        // WPF Window is closed it can never be shown again, which would leave the Control
+        // window unable to redisplay output. Hide instead, unless we're actually quitting.
+        if (AllowClose) return;
+        e.Cancel = true;
+        Hide();
     }
 
     public void ShowOnScreen(WinFormsScreen screen)
