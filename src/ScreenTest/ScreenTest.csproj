@@ -12,7 +12,7 @@
     <RootNamespace>ScreenTest</RootNamespace>
     <Product>AT ScreenTest</Product>
     <AssemblyTitle>AT ScreenTest — 4K Display Test Utility</AssemblyTitle>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
 </Project>

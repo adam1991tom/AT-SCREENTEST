@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using WinFormsScreen = System.Windows.Forms.Screen;
 
@@ -9,12 +10,12 @@ public partial class MainWindow : Window
 {
     private WinFormsScreen _currentScreen = WinFormsScreen.PrimaryScreen ?? WinFormsScreen.AllScreens[0];
     private int _patternIndex;
-    private bool _fullscreen = true;
+    private bool _fullscreen;
+    private Rect _restoreBounds;
 
     public MainWindow()
     {
         InitializeComponent();
-        SourceInitialized += (_, _) => MonitorHelper.CoverScreen(this, _currentScreen);
         Loaded += (_, _) =>
         {
             PatternDisplay.SetPattern(TestPatternInfo.Order[_patternIndex]);
@@ -27,7 +28,7 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Escape:
-                Close();
+                if (_fullscreen) ToggleFullscreen();
                 break;
 
             case Key.Right:
@@ -48,9 +49,7 @@ public partial class MainWindow : Window
                 break;
 
             case Key.M:
-                _currentScreen = MonitorHelper.NextScreen(_currentScreen);
-                MonitorHelper.CoverScreen(this, _currentScreen);
-                RefreshOverlay();
+                MoveToNextScreen();
                 break;
 
             case Key.F:
@@ -125,11 +124,38 @@ public partial class MainWindow : Window
         RefreshOverlay();
     }
 
+    /// <summary>The monitor the window is currently sitting on, wherever it's been dragged to.</summary>
+    private WinFormsScreen CurrentScreen()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        return hwnd == IntPtr.Zero ? _currentScreen : WinFormsScreen.FromHandle(hwnd);
+    }
+
+    private void MoveToNextScreen()
+    {
+        _currentScreen = MonitorHelper.NextScreen(CurrentScreen());
+        if (_fullscreen)
+        {
+            MonitorHelper.CoverScreen(this, _currentScreen);
+        }
+        else
+        {
+            var area = _currentScreen.WorkingArea;
+            Width = Math.Min(Width, area.Width - 80);
+            Height = Math.Min(Height, area.Height - 80);
+            Left = area.Left + (area.Width - Width) / 2;
+            Top = area.Top + (area.Height - Height) / 2;
+        }
+        RefreshOverlay();
+    }
+
     private void ToggleFullscreen()
     {
         _fullscreen = !_fullscreen;
         if (_fullscreen)
         {
+            _restoreBounds = new Rect(Left, Top, Width, Height);
+            _currentScreen = CurrentScreen();
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
             MonitorHelper.CoverScreen(this, _currentScreen);
@@ -139,16 +165,17 @@ public partial class MainWindow : Window
             WindowStyle = WindowStyle.SingleBorderWindow;
             ResizeMode = ResizeMode.CanResize;
             WindowState = WindowState.Normal;
-            Width = 1280;
-            Height = 800;
-            Left = _currentScreen.WorkingArea.Left + 80;
-            Top = _currentScreen.WorkingArea.Top + 80;
+            Left = _restoreBounds.Left;
+            Top = _restoreBounds.Top;
+            Width = _restoreBounds.Width;
+            Height = _restoreBounds.Height;
         }
         RefreshOverlay();
     }
 
     private void RefreshOverlay()
     {
+        _currentScreen = CurrentScreen();
         var mode = DisplayInfo.GetCurrentMode(_currentScreen.DeviceName);
         var dpiScale = VisualTreeHelperDpi();
         var pattern = TestPatternInfo.Order[_patternIndex];
@@ -169,8 +196,8 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(adjustment)) lines.Add(adjustment);
 
         lines.Add("");
-        lines.Add("<- / -> pattern   1-0 jump   I overlay   M monitor   F fullscreen   Esc quit");
-        lines.Add("+/- adjust   [ / ] adjust rows (tile map)");
+        lines.Add("<- / -> pattern   1-0 jump   I overlay   M next monitor   F fullscreen   Esc exit fullscreen");
+        lines.Add("+/- adjust   [ / ] adjust rows (tile map)   drag window to move to another screen");
 
         PatternDisplay.OverlayText = string.Join("\n", lines);
         PatternDisplay.InvalidateVisual();

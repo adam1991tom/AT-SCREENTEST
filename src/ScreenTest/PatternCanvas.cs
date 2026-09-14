@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
 using Point = System.Windows.Point;
@@ -11,18 +12,18 @@ namespace ScreenTest;
 /// <summary>
 /// Renders the currently selected test pattern directly via DrawingContext for full
 /// control over pixel-level accuracy (important for dead-pixel / checkerboard / geometry
-/// patterns on high-DPI 4K displays).
+/// patterns on high-DPI 4K displays). Most patterns animate continuously off a shared
+/// elapsed-time clock; geometry and sharpness patterns stay static since they need to
+/// hold still to be measured against.
 /// </summary>
 public class PatternCanvas : FrameworkElement
 {
     private static readonly int[] CheckerSizes = { 1, 2, 4, 8, 16, 32, 64 };
     private static readonly double[] MotionSpeeds = { 120, 240, 480, 960, 1920 }; // DIPs/sec
 
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
     private int _checkerSizeIndex = 1;
     private int _motionSpeedIndex = 2;
-    private double _motionLineX;
-    private DateTime _lastFrameTime;
-    private bool _animating;
     private int _tileCols = 8;
     private int _tileRows = 4;
 
@@ -30,18 +31,20 @@ public class PatternCanvas : FrameworkElement
     public bool ShowOverlay { get; set; } = true;
     public string OverlayText { get; set; } = string.Empty;
 
+    public PatternCanvas()
+    {
+        CompositionTarget.Rendering += (_, _) => InvalidateVisual();
+    }
+
     public void SetPattern(TestPattern pattern)
     {
         Pattern = pattern;
-        _motionLineX = 0;
-        UpdateAnimationState();
         InvalidateVisual();
     }
 
     public void AdjustCheckerSize(int direction)
     {
         _checkerSizeIndex = Math.Clamp(_checkerSizeIndex + direction, 0, CheckerSizes.Length - 1);
-        InvalidateVisual();
     }
 
     public void AdjustMotionSpeed(int direction)
@@ -52,13 +55,11 @@ public class PatternCanvas : FrameworkElement
     public void AdjustTileColumns(int direction)
     {
         _tileCols = Math.Clamp(_tileCols + direction, 1, 64);
-        InvalidateVisual();
     }
 
     public void AdjustTileRows(int direction)
     {
         _tileRows = Math.Clamp(_tileRows + direction, 1, 64);
-        InvalidateVisual();
     }
 
     public string AdjustmentSummary() => Pattern switch
@@ -69,35 +70,7 @@ public class PatternCanvas : FrameworkElement
         _ => string.Empty,
     };
 
-    private void UpdateAnimationState()
-    {
-        var shouldAnimate = Pattern == TestPattern.MotionLine;
-        if (shouldAnimate == _animating) return;
-
-        _animating = shouldAnimate;
-        if (_animating)
-        {
-            _lastFrameTime = DateTime.UtcNow;
-            CompositionTarget.Rendering += OnRendering;
-        }
-        else
-        {
-            CompositionTarget.Rendering -= OnRendering;
-        }
-    }
-
-    private void OnRendering(object? sender, EventArgs e)
-    {
-        var now = DateTime.UtcNow;
-        var dt = (now - _lastFrameTime).TotalSeconds;
-        _lastFrameTime = now;
-
-        var width = ActualWidth > 0 ? ActualWidth : 1920;
-        _motionLineX += MotionSpeeds[_motionSpeedIndex] * dt;
-        if (_motionLineX > width) _motionLineX = 0;
-
-        InvalidateVisual();
-    }
+    private double Elapsed => _clock.Elapsed.TotalSeconds;
 
     private double DpiScale
     {
@@ -121,12 +94,12 @@ public class PatternCanvas : FrameworkElement
 
         switch (Pattern)
         {
-            case TestPattern.SolidBlack: dc.DrawRectangle(Brushes.Black, null, rect); break;
-            case TestPattern.SolidWhite: dc.DrawRectangle(Brushes.White, null, rect); break;
-            case TestPattern.SolidRed: dc.DrawRectangle(Brushes.Red, null, rect); break;
-            case TestPattern.SolidGreen: dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0, 255, 0)), null, rect); break;
-            case TestPattern.SolidBlue: dc.DrawRectangle(Brushes.Blue, null, rect); break;
-            case TestPattern.Gray50: dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(128, 128, 128)), null, rect); break;
+            case TestPattern.SolidBlack: DrawPulsingSolid(dc, rect, Colors.Black); break;
+            case TestPattern.SolidWhite: DrawPulsingSolid(dc, rect, Colors.White); break;
+            case TestPattern.SolidRed: DrawPulsingSolid(dc, rect, Color.FromRgb(255, 0, 0)); break;
+            case TestPattern.SolidGreen: DrawPulsingSolid(dc, rect, Color.FromRgb(0, 255, 0)); break;
+            case TestPattern.SolidBlue: DrawPulsingSolid(dc, rect, Color.FromRgb(0, 0, 255)); break;
+            case TestPattern.Gray50: DrawPulsingSolid(dc, rect, Color.FromRgb(128, 128, 128)); break;
             case TestPattern.ColorBars: DrawColorBars(dc, rect); break;
             case TestPattern.GrayscaleGradient: DrawGrayscaleGradient(dc, rect); break;
             case TestPattern.RgbGradient: DrawRgbGradient(dc, rect); break;
@@ -144,51 +117,73 @@ public class PatternCanvas : FrameworkElement
         }
     }
 
-    private static void DrawColorBars(DrawingContext dc, Rect rect)
+    /// <summary>Modulates a solid color's channels with a slow sine "breathing" pulse.</summary>
+    private static Color PulseColor(Color baseColor, double amplitude, double elapsed, double period)
     {
-        Color[] colors =
-        {
-            Colors.White,
-            Color.FromRgb(255, 255, 0),   // Yellow
-            Color.FromRgb(0, 255, 255),   // Cyan
-            Color.FromRgb(0, 255, 0),     // Green
-            Color.FromRgb(255, 0, 255),   // Magenta
-            Color.FromRgb(255, 0, 0),     // Red
-            Color.FromRgb(0, 0, 255),     // Blue
-            Colors.Black,
-        };
+        var phase = Math.Sin(2 * Math.PI * elapsed / period);
+        byte Pulse(byte channel) => (byte)Math.Clamp(channel + amplitude * phase, 0, 255);
+        return Color.FromRgb(Pulse(baseColor.R), Pulse(baseColor.G), Pulse(baseColor.B));
+    }
 
+    private void DrawPulsingSolid(DrawingContext dc, Rect rect, Color baseColor)
+    {
+        var color = PulseColor(baseColor, 45, Elapsed, 2.4);
+        dc.DrawRectangle(new SolidColorBrush(color), null, rect);
+    }
+
+    private void DrawColorBars(DrawingContext dc, Rect rect)
+    {
         dc.DrawRectangle(Brushes.Black, null, rect);
-        var barWidth = rect.Width / colors.Length;
-        for (var i = 0; i < colors.Length; i++)
+
+        const int barCount = 8;
+        var rotation = (Elapsed * 20) % 360; // slowly rotating spectrum, 18s per full cycle
+        var barWidth = rect.Width / barCount;
+
+        for (var i = 0; i < barCount; i++)
         {
+            var hue = (i * (360.0 / barCount) + rotation) % 360;
             var barRect = new Rect(rect.X + i * barWidth, rect.Y, barWidth + 1, rect.Height);
-            dc.DrawRectangle(new SolidColorBrush(colors[i]), null, barRect);
+            dc.DrawRectangle(new SolidColorBrush(HsvToColor(hue, 1.0, 1.0)), null, barRect);
         }
     }
 
-    private static void DrawGrayscaleGradient(DrawingContext dc, Rect rect)
+    private static LinearGradientBrush ScrollingGradient(Color from, Color to, double phase)
     {
-        var brush = new LinearGradientBrush(Colors.Black, Colors.White, new Point(0, 0), new Point(1, 0));
-        dc.DrawRectangle(brush, null, rect);
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new Point(phase, 0),
+            EndPoint = new Point(phase + 1, 0),
+            SpreadMethod = GradientSpreadMethod.Repeat,
+        };
+        brush.GradientStops.Add(new GradientStop(from, 0));
+        brush.GradientStops.Add(new GradientStop(to, 1));
+        return brush;
     }
 
-    private static void DrawRgbGradient(DrawingContext dc, Rect rect)
+    private void DrawGrayscaleGradient(DrawingContext dc, Rect rect)
     {
+        var phase = (Elapsed * 0.15) % 1.0;
+        dc.DrawRectangle(ScrollingGradient(Colors.Black, Colors.White, phase), null, rect);
+    }
+
+    private void DrawRgbGradient(DrawingContext dc, Rect rect)
+    {
+        var phase = (Elapsed * 0.15) % 1.0;
         var third = rect.Height / 3.0;
         var redRect = new Rect(rect.X, rect.Y, rect.Width, third);
         var greenRect = new Rect(rect.X, rect.Y + third, rect.Width, third);
         var blueRect = new Rect(rect.X, rect.Y + 2 * third, rect.Width, rect.Height - 2 * third);
 
-        dc.DrawRectangle(new LinearGradientBrush(Colors.Black, Colors.Red, new Point(0, 0), new Point(1, 0)), null, redRect);
-        dc.DrawRectangle(new LinearGradientBrush(Colors.Black, Colors.Lime, new Point(0, 0), new Point(1, 0)), null, greenRect);
-        dc.DrawRectangle(new LinearGradientBrush(Colors.Black, Colors.Blue, new Point(0, 0), new Point(1, 0)), null, blueRect);
+        dc.DrawRectangle(ScrollingGradient(Colors.Black, Colors.Red, phase), null, redRect);
+        dc.DrawRectangle(ScrollingGradient(Colors.Black, Colors.Lime, phase), null, greenRect);
+        dc.DrawRectangle(ScrollingGradient(Colors.Black, Colors.Blue, phase), null, blueRect);
     }
 
     private void DrawCheckerboard(DrawingContext dc, Rect rect)
     {
         var cellPixels = CheckerSizes[_checkerSizeIndex];
         var cellSize = cellPixels * DevicePixel;
+        var invert = (long)(Elapsed / 1.0) % 2 == 1; // auto-inverts every second: classic pixel-refresh/burn-in pattern
 
         dc.DrawRectangle(Brushes.Black, null, rect);
 
@@ -202,7 +197,8 @@ public class PatternCanvas : FrameworkElement
             {
                 for (var col = 0; col < cols; col++)
                 {
-                    if ((row + col) % 2 != 0) continue;
+                    var isWhite = ((row + col) % 2 == 0) != invert;
+                    if (!isWhite) continue;
                     var x = col * cellSize;
                     var y = row * cellSize;
                     ctx.BeginFigure(new Point(x, y), true, true);
@@ -305,20 +301,21 @@ public class PatternCanvas : FrameworkElement
         dc.DrawRectangle(Brushes.Black, null, rect);
         var lineWidth = Math.Max(DevicePixel * 6, 4);
         var pen = new Pen(Brushes.White, lineWidth);
-        dc.DrawLine(pen, new Point(_motionLineX, 0), new Point(_motionLineX, rect.Height));
+        var x = (Elapsed * MotionSpeeds[_motionSpeedIndex]) % Math.Max(rect.Width, 1);
+        dc.DrawLine(pen, new Point(x, 0), new Point(x, rect.Height));
     }
 
     private void DrawOverscanBorder(DrawingContext dc, Rect rect)
     {
         dc.DrawRectangle(Brushes.Black, null, rect);
 
-        var edgePen = new Pen(Brushes.Red, DevicePixel);
-        edgePen.Freeze();
+        var dashOffset = -(Elapsed * 8) % 8; // "marching ants" crawling along both borders
+
+        var edgePen = new Pen(Brushes.Red, DevicePixel) { DashStyle = new DashStyle(new double[] { 4, 4 }, dashOffset) };
         dc.DrawRectangle(null, edgePen, new Rect(0.5, 0.5, rect.Width - 1, rect.Height - 1));
 
         // 5% inset "safe area" commonly used to check for TV overscan
-        var insetPen = new Pen(Brushes.Lime, DevicePixel);
-        insetPen.Freeze();
+        var insetPen = new Pen(Brushes.Lime, DevicePixel) { DashStyle = new DashStyle(new double[] { 4, 4 }, dashOffset) };
         var insetX = rect.Width * 0.05;
         var insetY = rect.Height * 0.05;
         dc.DrawRectangle(null, insetPen,
@@ -347,10 +344,17 @@ public class PatternCanvas : FrameworkElement
 
         var gridPen = new Pen(Brushes.Black, DevicePixel * 2);
         gridPen.Freeze();
+        var highlightPen = new Pen(Brushes.Yellow, Math.Max(DevicePixel * 4, 3));
+        highlightPen.Freeze();
 
         var fontSize = Math.Clamp(Math.Min(cellWidth, cellHeight) * 0.16, 7, 22);
         var typeface = new Typeface(new FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
         var markerSize = Math.Min(cellWidth, cellHeight) * 0.18;
+
+        // Scanner: a highlight sweeps tile-by-tile in row-major order, so an operator can
+        // watch the physical wall and confirm panels light up in the expected sequence.
+        var tileCount = _tileCols * _tileRows;
+        var activeIndex = tileCount > 0 ? (int)(Elapsed / 0.15) % tileCount : -1;
 
         for (var row = 0; row < _tileRows; row++)
         {
@@ -386,6 +390,11 @@ public class PatternCanvas : FrameworkElement
                     cellRect.X + (cellRect.Width - label.Width) / 2,
                     cellRect.Y + (cellRect.Height - label.Height) / 2);
                 dc.DrawText(label, textOrigin);
+
+                if (row * _tileCols + col == activeIndex)
+                {
+                    dc.DrawRectangle(null, highlightPen, cellRect);
+                }
             }
         }
     }

@@ -4,11 +4,12 @@
         xmlns:local="clr-namespace:ScreenTest"
         Title="AT ScreenTest"
         Background="Black"
-        WindowStyle="None"
-        ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow"
+        ResizeMode="CanResize"
         ShowInTaskbar="True"
-        WindowStartupLocation="Manual"
-        Left="0" Top="0" Width="1024" Height="768"
+        WindowStartupLocation="CenterScreen"
+        Width="1000" Height="700"
+        MinWidth="480" MinHeight="360"
         KeyDown="OnKeyDown">
     <Grid>
         <local:PatternCanvas x:Name="PatternDisplay" />
